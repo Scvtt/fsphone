@@ -1,30 +1,64 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-
+import 'package:flutter_test/flutter_test.dart';
 import 'package:fsphone/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('Login offers a password and a one-time token', (tester) async {
+    await tester.pumpWidget(const FsPhoneApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('One-time token'), findsOneWidget);
+    expect(find.text('Provision with QR'), findsOneWidget);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+  testWidgets('A test sign-in opens the keypad and accepts digits', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const FsPhoneApp());
+    await tester.enterText(find.byKey(const Key('login-extension')), '1001');
+    await tester.enterText(find.byKey(const Key('login-secret')), 'secret');
+    await tester.tap(find.byKey(const Key('login-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Keypad'), findsWidgets);
+    expect(find.text('Registered · WSS'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('dial-key-2')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('dial-key-1')));
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('dial-display')),
+        matching: find.text('21'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Contacts are reachable from the rail', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const FsPhoneApp());
+    await tester.enterText(find.byKey(const Key('login-extension')), '1001');
+    await tester.enterText(find.byKey(const Key('login-secret')), 'secret');
+    await tester.tap(find.byKey(const Key('login-submit')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Contacts'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Jordan Hale'), findsWidgets);
+    expect(find.text('Company'), findsWidgets);
+    expect(find.byKey(const Key('shell-search')), findsOneWidget);
   });
 }

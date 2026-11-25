@@ -1,0 +1,186 @@
+import 'package:fsphone/models/phone_models.dart';
+
+/// Sample directory so the desktop UI can be exercised before SIP exists.
+List<DirectoryContact> sampleContacts() {
+  return const [
+    DirectoryContact(
+      id: 'c200',
+      name: 'Jordan Hale',
+      extension: '200',
+      department: 'Sales',
+      email: 'jordan.hale@example.com',
+      presence: PresenceStatus.available,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'c201',
+      name: 'Riley Chen',
+      extension: '201',
+      department: 'Support',
+      email: 'riley.chen@example.com',
+      presence: PresenceStatus.away,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'c202',
+      name: 'Morgan Blake',
+      extension: '202',
+      department: 'Accounts',
+      email: 'morgan.blake@example.com',
+      presence: PresenceStatus.doNotDisturb,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'c204',
+      name: 'Casey Nguyen',
+      extension: '204',
+      department: 'Projects',
+      email: 'casey.nguyen@example.com',
+      presence: PresenceStatus.available,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'c205',
+      name: 'Avery Shah',
+      extension: '205',
+      department: 'Reception',
+      email: 'avery.shah@example.com',
+      presence: PresenceStatus.available,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'c210',
+      name: 'Quinn Patel',
+      extension: '210',
+      department: 'Warehouse',
+      email: 'quinn.patel@example.com',
+      presence: PresenceStatus.lunch,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'c211',
+      name: 'Parker Singh',
+      extension: '211',
+      department: 'Field',
+      email: 'parker.singh@example.com',
+      presence: PresenceStatus.businessTrip,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'c214',
+      name: 'Rowan Ellis',
+      extension: '214',
+      department: 'Support',
+      email: 'rowan.ellis@example.com',
+      presence: PresenceStatus.available,
+      company: true,
+    ),
+    DirectoryContact(
+      id: 'p300',
+      name: 'Drew Coleman',
+      extension: '0412 555 019',
+      department: 'Personal',
+      email: 'drew.coleman@example.com',
+      presence: PresenceStatus.available,
+      company: false,
+    ),
+    DirectoryContact(
+      id: 'p301',
+      name: 'Sasha Ibrahim',
+      extension: '0390 555 214',
+      department: 'Personal',
+      email: 'sasha.ibrahim@example.com',
+      presence: PresenceStatus.away,
+      company: false,
+    ),
+  ];
+}
+
+List<RecentCall> sampleRecents(DateTime now) {
+  return [
+    RecentCall(
+      id: 'r1',
+      name: 'Avery Shah',
+      number: '205',
+      direction: CallDirection.missed,
+      media: CallMedia.voice,
+      at: now.subtract(const Duration(minutes: 12)),
+      length: Duration.zero,
+    ),
+    RecentCall(
+      id: 'r2',
+      name: 'Jordan Hale',
+      number: '200',
+      direction: CallDirection.outgoing,
+      media: CallMedia.video,
+      at: now.subtract(const Duration(hours: 1, minutes: 5)),
+      length: const Duration(minutes: 14, seconds: 22),
+    ),
+    RecentCall(
+      id: 'r3',
+      name: 'Riley Chen',
+      number: '201',
+      direction: CallDirection.incoming,
+      media: CallMedia.voice,
+      at: now.subtract(const Duration(hours: 3)),
+      length: const Duration(minutes: 6, seconds: 4),
+    ),
+    RecentCall(
+      id: 'r4',
+      name: 'Drew Coleman',
+      number: '0412 555 019',
+      direction: CallDirection.outgoing,
+      media: CallMedia.voice,
+      at: now.subtract(const Duration(days: 1, hours: 2)),
+      length: const Duration(minutes: 2, seconds: 41),
+    ),
+    RecentCall(
+      id: 'r5',
+      name: 'Casey Nguyen',
+      number: '204',
+      direction: CallDirection.missed,
+      media: CallMedia.voice,
+      at: now.subtract(const Duration(days: 1, hours: 4)),
+      length: Duration.zero,
+    ),
+    RecentCall(
+      id: 'r6',
+      name: 'Reception queue',
+      number: '800',
+      direction: CallDirection.incoming,
+      media: CallMedia.voice,
+      at: now.subtract(const Duration(days: 2)),
+      length: const Duration(seconds: 48),
+      detail: 'Answered elsewhere',
+    ),
+  ];
+}
+
+List<VoicemailMessage> sampleVoicemail(DateTime now) {
+  return [
+    VoicemailMessage(
+      id: 'v1',
+      name: 'Avery Shah',
+      number: '205',
+      at: now.subtract(const Duration(minutes: 18)),
+      length: const Duration(seconds: 36),
+      unread: true,
+    ),
+    VoicemailMessage(
+      id: 'v2',
+      name: 'Unknown',
+      number: '0390 555 880',
+      at: now.subtract(const Duration(hours: 5)),
+      length: const Duration(minutes: 1, seconds: 12),
+      unread: true,
+    ),
+    VoicemailMessage(
+      id: 'v3',
+      name: 'Jordan Hale',
+      number: '200',
+      at: now.subtract(const Duration(days: 1, hours: 1)),
+      length: const Duration(seconds: 21),
+      unread: false,
+    ),
+  ];
+}
