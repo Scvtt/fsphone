@@ -1,7 +1,16 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:fsphone/models/phone_models.dart';
 import 'package:fsphone/state/phone_controller.dart';
 import 'package:fsphone/theme/fs_colors.dart';
+
+/// Payload encoded in the test provisioning code.
+const qrLoginServer = 'wss://pbx.example.com:7443';
+const qrLoginExtension = '1001';
+const qrLoginToken = 'test-token-1001';
+
+String get qrLoginPayload =>
+    'fsphone://login?token=$qrLoginToken&ext=$qrLoginExtension&server=${Uri.encodeComponent(qrLoginServer)}';
 
 /// Test sign-in for the desktop UI. Credentials stay on this machine and are
 /// not sent anywhere. The QR block stands in for the PBX provisioning code.
@@ -57,15 +66,11 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _simulateQr() {
-    setState(() {
-      _mode = LoginMode.token;
-      _error = null;
-      if (_extension.text.trim().isEmpty) {
-        _extension.text = '1001';
-      }
-      _secret.text = 'test-token-1001';
-    });
+  void _signInFromQr() {
+    widget.controller.signIn(
+      displayServer: qrLoginServer,
+      displayExtension: qrLoginExtension,
+    );
   }
 
   @override
@@ -134,19 +139,35 @@ class _LoginScreenState extends State<LoginScreen> {
             style: TextStyle(color: FsColors.muted, height: 1.35),
           ),
           const SizedBox(height: 18),
-          const CustomPaint(
-            painter: _QrPlaceholderPainter(),
-            size: Size(168, 168),
-          ),
-          const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: _simulateQr,
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Use a test scan'),
+          Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              key: const Key('login-qr'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: _signInFromQr,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: QrImageView(
+                  data: qrLoginPayload,
+                  version: QrVersions.auto,
+                  size: 168,
+                  backgroundColor: Colors.white,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: FsColors.ink,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: FsColors.ink,
+                  ),
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 8),
           const Text(
-            'Test stand-in. It fills a one-time token and does not read a camera.',
+            'Click the code, or scan it, to sign straight in. It encodes the test provisioning link.',
             textAlign: TextAlign.center,
             style: TextStyle(color: FsColors.muted, fontSize: 12),
           ),
@@ -241,56 +262,4 @@ class _LoginScreenState extends State<LoginScreen> {
       ],
     );
   }
-}
-
-class _QrPlaceholderPainter extends CustomPainter {
-  const _QrPlaceholderPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final background = Paint()..color = Colors.white;
-    final ink = Paint()..color = FsColors.ink;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(8)),
-      background,
-    );
-    const modules = 21;
-    final cell = size.width / modules;
-    void finder(int ox, int oy) {
-      for (var y = 0; y < 7; y++) {
-        for (var x = 0; x < 7; x++) {
-          final edge = x == 0 || y == 0 || x == 6 || y == 6;
-          final core = x >= 2 && x <= 4 && y >= 2 && y <= 4;
-          if (edge || core) {
-            canvas.drawRect(
-              Rect.fromLTWH((ox + x) * cell, (oy + y) * cell, cell, cell),
-              ink,
-            );
-          }
-        }
-      }
-    }
-
-    finder(0, 0);
-    finder(modules - 7, 0);
-    finder(0, modules - 7);
-    for (var y = 0; y < modules; y++) {
-      for (var x = 0; x < modules; x++) {
-        final inFinder =
-            (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13);
-        if (inFinder) {
-          continue;
-        }
-        if ((x * 17 + y * 13) % 3 == 0) {
-          canvas.drawRect(
-            Rect.fromLTWH(x * cell, y * cell, cell - 0.4, cell - 0.4),
-            ink,
-          );
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

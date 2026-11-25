@@ -110,6 +110,10 @@ class ActiveCall {
   bool showKeypad = false;
   String dtmf = '';
   bool consulting = false;
+
+  /// True while the agent has switched back to the original caller and the
+  /// consulted party is the one on hold.
+  bool consultOnHold = false;
   String? consultName;
   String? consultNumber;
 
@@ -143,3 +147,11 @@ String formatDuration(Duration duration) {
 }
 
 String presenceLabel(PresenceStatus status) => status.label;
+
+/// A ringing call that has not been answered. No media path is attached.
+class IncomingCall {
+  const IncomingCall({required this.name, required this.number});
+
+  final String name;
+  final String number;
+}

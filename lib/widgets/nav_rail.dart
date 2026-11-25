@@ -12,7 +12,8 @@ class PhoneNavRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 84,
+      key: const Key('nav-rail'),
+      width: 132,
       color: FsColors.nav,
       child: Column(
         children: [
@@ -159,7 +160,7 @@ class _NavButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = selected ? Colors.white : const Color(0xFFB7C0CE);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       child: Material(
         color: selected ? FsColors.navActive : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
@@ -168,7 +169,7 @@ class _NavButton extends StatelessWidget {
           onTap: onTap,
           hoverColor: FsColors.navHover,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
             child: Column(
               children: [
                 Badge(

@@ -28,6 +28,8 @@ class ShellScreen extends StatelessWidget {
             child: Column(
               children: [
                 _TopBar(controller: controller),
+                if (controller.incoming != null)
+                  _IncomingBanner(controller: controller),
                 if (onCall && !showDialer)
                   _ReturnToCall(controller: controller),
                 Expanded(child: _body()),
@@ -129,6 +131,46 @@ class _TopBar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _IncomingBanner extends StatelessWidget {
+  const _IncomingBanner({required this.controller});
+
+  final PhoneController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final ringing = controller.incoming;
+    if (ringing == null) {
+      return const SizedBox.shrink();
+    }
+    return Material(
+      color: const Color(0xFFE7F0FF),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        child: Row(
+          children: [
+            const Icon(Icons.ring_volume, color: FsColors.accent),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Incoming call · ${ringing.name} · ${ringing.number}',
+              ),
+            ),
+            FilledButton(
+              onPressed: controller.answerIncoming,
+              child: const Text('Answer'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: controller.declineIncoming,
+              child: const Text('Decline'),
+            ),
+          ],
+        ),
       ),
     );
   }

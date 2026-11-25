@@ -59,104 +59,104 @@ class DialerScreen extends StatelessWidget {
 
   Widget _padColumn(List<DirectoryContact> matches) {
     final dialed = controller.dialed;
-    return Align(
-      alignment: Alignment.topCenter,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+      child: Column(
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: KeyedSubtree(
-                      key: const Key('dial-display'),
-                      child: Text(
-                        dialed.isEmpty ? 'Enter a number' : dialed,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: dialed.isEmpty ? 0 : 1.4,
-                          color: dialed.isEmpty ? FsColors.muted : FsColors.ink,
-                        ),
-                      ),
+              Expanded(
+                child: KeyedSubtree(
+                  key: const Key('dial-display'),
+                  child: Text(
+                    dialed.isEmpty ? 'Enter a number' : dialed,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: dialed.isEmpty ? 0 : 1.4,
+                      color: dialed.isEmpty ? FsColors.muted : FsColors.ink,
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'Delete',
-                    onPressed: dialed.isEmpty ? null : controller.backspace,
-                    onLongPress: dialed.isEmpty ? null : controller.clearDialed,
-                    icon: const Icon(Icons.backspace_outlined),
-                  ),
-                ],
+                ),
               ),
-              const SizedBox(height: 8),
-              if (matches.isEmpty && dialed.isEmpty)
-                const Text(
-                  'Type, paste with the pad, or pick a recent contact. Enter places the call.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: FsColors.muted),
-                )
-              else
-                for (final contact in matches)
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: AvatarBadge(
-                      initials: contact.initials,
-                      status: contact.presence,
-                      radius: 16,
-                      background: const Color(0xFFE7EEF8),
-                      foreground: FsColors.ink,
-                    ),
-                    title: Text(contact.name),
-                    subtitle: Text(contact.extension),
-                    trailing: const Icon(Icons.call, color: FsColors.call),
-                    onTap: () => controller.placeCall(
-                      contact.extension,
-                      media: CallMedia.voice,
-                      name: contact.name,
-                    ),
-                  ),
-              const SizedBox(height: 12),
-              DialPad(
-                onDigit: controller.pushDigit,
-                onLongZero: () => controller.pushDigit('+'),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _RoundAction(
-                    tooltip: 'Video call',
-                    color: FsColors.accent,
-                    icon: Icons.videocam,
-                    onPressed: dialed.isEmpty
-                        ? null
-                        : () => controller.placeCall(
-                            dialed,
-                            media: CallMedia.video,
-                          ),
-                  ),
-                  const SizedBox(width: 28),
-                  _RoundAction(
-                    tooltip: 'Call',
-                    color: FsColors.call,
-                    icon: Icons.call,
-                    onPressed: dialed.isEmpty
-                        ? null
-                        : () => controller.placeCall(
-                            dialed,
-                            media: CallMedia.voice,
-                          ),
-                  ),
-                ],
+              IconButton(
+                tooltip: 'Delete',
+                onPressed: dialed.isEmpty ? null : controller.backspace,
+                onLongPress: dialed.isEmpty ? null : controller.clearDialed,
+                icon: const Icon(Icons.backspace_outlined),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 4),
+          if (matches.isEmpty && dialed.isEmpty)
+            const Text(
+              'Type a number or pick a speed dial. Enter places the call.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: FsColors.muted),
+            )
+          else
+            for (final contact in matches.take(2))
+              ListTile(
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                contentPadding: EdgeInsets.zero,
+                leading: AvatarBadge(
+                  initials: contact.initials,
+                  status: contact.presence,
+                  radius: 16,
+                  background: const Color(0xFFE7EEF8),
+                  foreground: FsColors.ink,
+                ),
+                title: Text(contact.name),
+                subtitle: Text(contact.extension),
+                trailing: const Icon(Icons.call, color: FsColors.call),
+                onTap: () => controller.placeCall(
+                  contact.extension,
+                  media: CallMedia.voice,
+                  name: contact.name,
+                ),
+              ),
+          Expanded(
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: SizedBox(
+                  width: 360,
+                  child: DialPad(
+                    onDigit: controller.pushDigit,
+                    onLongZero: () => controller.pushDigit('+'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _RoundAction(
+                tooltip: 'Video call',
+                color: FsColors.accent,
+                icon: Icons.videocam,
+                onPressed: dialed.isEmpty
+                    ? null
+                    : () =>
+                          controller.placeCall(dialed, media: CallMedia.video),
+              ),
+              const SizedBox(width: 28),
+              _RoundAction(
+                key: const Key('place-call'),
+                tooltip: 'Call',
+                color: FsColors.call,
+                icon: Icons.call,
+                onPressed: dialed.isEmpty
+                    ? null
+                    : () =>
+                          controller.placeCall(dialed, media: CallMedia.voice),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -208,6 +208,7 @@ class DialerScreen extends StatelessWidget {
 
 class _RoundAction extends StatelessWidget {
   const _RoundAction({
+    super.key,
     required this.tooltip,
     required this.color,
     required this.icon,

@@ -61,4 +61,100 @@ void main() {
     expect(find.text('Company'), findsWidgets);
     expect(find.byKey(const Key('shell-search')), findsOneWidget);
   });
+
+  testWidgets('Clicking the QR code signs in', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const FsPhoneApp());
+    await tester.tap(find.byKey(const Key('login-qr')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Registered · WSS'), findsOneWidget);
+    expect(find.text('Sign in'), findsNothing);
+  });
+
+  testWidgets('Dial pad fits the minimum window', (tester) async {
+    tester.view.physicalSize = const Size(1100, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const FsPhoneApp());
+    await _signIn(tester);
+
+    expect(tester.getSize(find.byKey(const Key('nav-rail'))).width, 132);
+    final hash = tester.getRect(find.byKey(const ValueKey('dial-key-#')));
+    expect(hash.top, greaterThanOrEqualTo(0));
+    expect(hash.bottom, lessThanOrEqualTo(720));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Attended transfer can switch back, and hang up still works', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const FsPhoneApp());
+    await _signIn(tester);
+    await tester.tap(find.byKey(const ValueKey('dial-key-2')));
+    await tester.tap(find.byKey(const ValueKey('dial-key-0')));
+    await tester.tap(find.byKey(const ValueKey('dial-key-5')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('place-call')));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('open-keypad')));
+    await tester.pump();
+    expect(find.byKey(const Key('keypad-back')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('keypad-back')));
+    await tester.pump();
+    expect(find.byKey(const Key('keypad-back')), findsNothing);
+
+    await tester.tap(find.text('Transfer'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.enterText(find.byKey(const Key('transfer-number')), '200');
+    await tester.pump();
+    await tester.tap(find.text('Attended'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Complete transfer'), findsOneWidget);
+    expect(find.text('Switch back'), findsOneWidget);
+    await tester.tap(find.text('Switch back'));
+    await tester.pump();
+    expect(find.text('Avery Shah'), findsWidgets);
+    expect(find.text('Jordan Hale is on hold.'), findsOneWidget);
+
+    await tester.tap(find.text('Contacts'));
+    await tester.pump();
+    await tester.tap(find.text('Keypad'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('hang-up')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('hang-up')), findsNothing);
+    expect(find.text('Complete transfer'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('dial-display')),
+        matching: find.text('205'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+}
+
+Future<void> _signIn(WidgetTester tester) async {
+  await tester.enterText(find.byKey(const Key('login-extension')), '1001');
+  await tester.enterText(find.byKey(const Key('login-secret')), 'secret');
+  await tester.tap(find.byKey(const Key('login-submit')));
+  await tester.pumpAndSettle();
 }

@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:fsphone/desktop/desktop_alerts.dart';
 import 'package:fsphone/screens/login_screen.dart';
 import 'package:fsphone/screens/shell_screen.dart';
 import 'package:fsphone/state/phone_controller.dart';
@@ -25,6 +26,14 @@ class FsPhoneApp extends StatefulWidget {
 
 class _FsPhoneAppState extends State<FsPhoneApp> {
   final PhoneController _controller = PhoneController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      DesktopAlerts.start(_controller);
+    });
+  }
 
   @override
   void dispose() {

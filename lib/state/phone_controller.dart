@@ -33,7 +33,12 @@ class PhoneController extends ChangeNotifier {
   final List<RecentCall> recents;
   final List<VoicemailMessage> voicemails;
   ActiveCall? call;
+  IncomingCall? incoming;
   String? playingVoicemailId;
+
+  /// Set by the Windows shell. Shows a system toast when the window is
+  /// minimized, unfocused, or off-screen. Null in tests.
+  Future<void> Function(IncomingCall call)? presentIncoming;
 
   Timer? _ticker;
   int _id = 0;
@@ -225,23 +230,28 @@ class PhoneController extends ChangeNotifier {
     if (current == null) {
       return;
     }
-    if (record) {
-      final detail = current.consulting
-          ? 'Consult with ${current.consultName} cancelled'
-          : null;
-      _pushRecent(
-        name: current.name,
-        number: current.number,
-        direction: CallDirection.outgoing,
-        media: current.media,
-        length: current.elapsed(DateTime.now()),
-        detail: detail,
-      );
+    try {
+      if (record) {
+        final detail = current.consulting
+            ? 'Consult with ${current.consultName} cancelled'
+            : null;
+        _pushRecent(
+          name: current.name,
+          number: current.number,
+          direction: CallDirection.outgoing,
+          media: current.media,
+          length: current.elapsed(DateTime.now()),
+          detail: detail,
+        );
+      }
+    } finally {
+      // Always drop the call, including after a failed transfer, so Hang up
+      // still works when the user leaves the call screen and comes back.
+      call = null;
+      _ticker?.cancel();
+      _ticker = null;
+      notifyListeners();
     }
-    call = null;
-    _ticker?.cancel();
-    _ticker = null;
-    notifyListeners();
   }
 
   void toggleMute() {
@@ -319,7 +329,30 @@ class PhoneController extends ChangeNotifier {
     current.consulting = true;
     current.consultName = name;
     current.consultNumber = number;
+    current.consultOnHold = false;
     current.showKeypad = false;
+    notifyListeners();
+  }
+
+  /// Leave the consulted party on hold and talk to the original caller again.
+  void switchBackToCaller() {
+    final current = call;
+    if (current == null || !current.consulting) {
+      return;
+    }
+    current.consultOnHold = true;
+    current.held = false;
+    notifyListeners();
+  }
+
+  /// Return to the consulted party and put the original caller back on hold.
+  void returnToConsult() {
+    final current = call;
+    if (current == null || !current.consulting) {
+      return;
+    }
+    current.consultOnHold = false;
+    current.held = true;
     notifyListeners();
   }
 
@@ -348,9 +381,42 @@ class PhoneController extends ChangeNotifier {
       return;
     }
     current.consulting = false;
+    current.consultOnHold = false;
     current.consultName = null;
     current.consultNumber = null;
     current.held = false;
+    notifyListeners();
+  }
+
+  /// Raises a test incoming call. Audio is not connected; the shell shows the
+  /// call, and Windows shows a toast when the window is not in front.
+  void simulateIncomingCall() {
+    final ringing = IncomingCall(
+      name: contacts.first.name,
+      number: contacts.first.extension,
+    );
+    incoming = ringing;
+    notifyListeners();
+    presentIncoming?.call(ringing);
+  }
+
+  void answerIncoming() {
+    final ringing = incoming;
+    if (ringing == null) {
+      return;
+    }
+    incoming = null;
+    if (call != null) {
+      hangUp();
+    }
+    placeCall(ringing.number, media: CallMedia.voice, name: ringing.name);
+  }
+
+  void declineIncoming() {
+    if (incoming == null) {
+      return;
+    }
+    incoming = null;
     notifyListeners();
   }
 

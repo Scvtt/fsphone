@@ -115,9 +115,18 @@ class SettingsScreen extends StatelessWidget {
               ),
               const ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text('Push notifications'),
+                title: Text('Incoming-call alerts'),
                 subtitle: Text(
-                  'Incoming-call push is for the iOS and Android apps. This desktop app stays registered instead.',
+                  'When this window is minimized or off-screen, an incoming call raises a Windows toast in the bottom-right with Answer and Decline. The Windows audio path is not connected, so this is the alert only.',
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  key: const Key('simulate-incoming'),
+                  onPressed: controller.simulateIncomingCall,
+                  icon: const Icon(Icons.notifications_active_outlined),
+                  label: const Text('Simulate incoming call'),
                 ),
               ),
             ],
