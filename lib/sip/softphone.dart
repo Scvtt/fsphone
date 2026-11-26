@@ -35,6 +35,15 @@ abstract class SoftphoneListener {
   });
   void onCallEnded(String reason);
 
+  /// The SIP dialog is up, but media may still be negotiating.
+  void onCallAccepted();
+
+  /// ICE is connected, so audio can pass.
+  void onMediaReady();
+
+  /// The consulted party left. The original call is still up.
+  void onConsultEnded();
+
   /// False when the user already cancelled, so a late INVITE is hung up.
   bool acceptOutgoing();
 }
@@ -58,9 +67,25 @@ abstract class Softphone {
   void sendDtmf(String tones);
   void refer(String target);
 
+  /// Holds the current call and invites [target] so an attended transfer can
+  /// be spoken to before it is completed.
+  Future<void> startConsult(String target);
+
+  /// Talk to the original caller again and hold the consult.
+  void switchToCaller();
+
+  /// Talk to the consulted party again and hold the original caller.
+  void switchToConsult();
+
+  /// REFER the original caller to [target], replacing the consult dialog.
+  void completeConsult(String target);
+
+  /// Hang up the consult and resume the original caller.
+  void cancelConsult();
+
   /// [microphoneId] and [speakerId] are WebRTC device ids. Null follows the
   /// Windows default for the next call.
-  void setAudioDevices({String? microphoneId, String? speakerId});
+  Future<void> setAudioDevices({String? microphoneId, String? speakerId});
 }
 
 /// Puts the chosen Windows devices into the media constraints sip_ua sends
@@ -75,10 +100,19 @@ class FsSipHelper extends SIPUAHelper {
     final media = Map<String, dynamic>.from(
       options['mediaConstraints'] as Map<dynamic, dynamic>,
     );
+    // Software echo cancellation holds the microphone until it can line
+    // the mic up with the speaker. On Windows those are often different
+    // devices, so the other party hears silence for a long time, or the
+    // mic never opens. A headset already does this processing.
     final audio = <String, dynamic>{
-      'echoCancellation': true,
-      'noiseSuppression': true,
-      'autoGainControl': true,
+      'echoCancellation': false,
+      'googEchoCancellation': false,
+      'googEchoCancellation2': false,
+      'googDAEchoCancellation': false,
+      'noiseSuppression': false,
+      'googNoiseSuppression': false,
+      'autoGainControl': false,
+      'googAutoGainControl': false,
     };
     final microphone = microphoneSourceId;
     // Windows reads the capture device from optional.sourceId. A top-level
@@ -107,6 +141,11 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
   SoftphoneListener? _listener;
   Call? _active;
   Call? _ringing;
+  Call? _primary;
+  Call? _consult;
+  bool _consultPending = false;
+  Timer? _mediaWatch;
+  final Set<String> _microphoneOpened = <String>{};
   String _domain = '';
   bool _listening = false;
 
@@ -132,7 +171,7 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
       ..register_expires = 300
       ..userAgent = 'FS Phone'
       ..dtmfMode = DtmfMode.RFC2833
-      ..iceGatheringTimeout = 5000;
+      ..iceGatheringTimeout = 500;
     settings.webSocketSettings.allowBadCertificate =
         account.allowBadCertificate;
     settings.iceServers = account.iceServers;
@@ -141,8 +180,7 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
 
   @override
   Future<void> disconnect() async {
-    _active = null;
-    _ringing = null;
+    _clearCalls();
     _helper.stop();
   }
 
@@ -174,6 +212,7 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
     _active = ringing;
     _ringing = null;
     ringing.answer(_helper.buildCallOptions(!video));
+    _armMediaWatch(ringing);
   }
 
   @override
@@ -187,8 +226,9 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
   void hangup() {
     final active = _active;
     final ringing = _ringing;
-    _active = null;
-    _ringing = null;
+    final primary = _primary;
+    final consult = _consult;
+    _clearCalls();
     try {
       active?.hangup();
     } catch (_) {
@@ -197,6 +237,16 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
     try {
       ringing?.hangup(<String, dynamic>{'status_code': 486});
     } catch (_) {}
+    if (primary != null && primary.id != active?.id) {
+      try {
+        primary.hangup();
+      } catch (_) {}
+    }
+    if (consult != null && consult.id != active?.id) {
+      try {
+        consult.hangup();
+      } catch (_) {}
+    }
     try {
       _helper.terminateSessions(<String, dynamic>{});
     } catch (_) {
@@ -235,18 +285,232 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
 
   @override
   void refer(String target) {
-    final dial = target.contains('@') ? target : 'sip:$target@$_domain';
-    _active?.refer(dial);
+    _talking?.refer(_dial(target));
   }
 
   @override
-  void setAudioDevices({String? microphoneId, String? speakerId}) {
+  Future<void> startConsult(String target) async {
+    final primary = _active;
+    if (primary == null) {
+      return;
+    }
+    _primary = primary;
+    _consult = null;
+    _consultPending = true;
+    try {
+      primary.hold();
+    } catch (_) {
+      // The consult can still be placed if the hold re-INVITE fails.
+    }
+    final sent = await invite(target, video: false);
+    if (!sent) {
+      _consultPending = false;
+      _primary = null;
+      try {
+        primary.unhold();
+      } catch (_) {}
+    }
+  }
+
+  @override
+  void switchToCaller() {
+    _hold(_consult, true);
+    _hold(_primary, false);
+    _active = _primary;
+  }
+
+  @override
+  void switchToConsult() {
+    _hold(_primary, true);
+    _hold(_consult, false);
+    if (_consult != null) {
+      _active = _consult;
+    }
+  }
+
+  @override
+  void completeConsult(String target) {
+    final primary = _primary ?? _active;
+    final consult = _consult;
+    _clearCalls();
+    if (primary == null) {
+      return;
+    }
+    final session = consult?.session;
+    final callId = session?.call_id;
+    final fromTag = session?.from_tag;
+    final toTag = session?.to_tag;
+    if (session != null &&
+        callId != null &&
+        callId.isNotEmpty &&
+        fromTag != null &&
+        fromTag.isNotEmpty &&
+        toTag != null &&
+        toTag.isNotEmpty) {
+      primary.refer(_dial(target), <String, dynamic>{
+        'replaces': session,
+        'extraHeaders': <dynamic>[],
+      });
+      return;
+    }
+    primary.refer(_dial(target));
+  }
+
+  @override
+  void cancelConsult() {
+    final consult = _consult;
+    final primary = _primary;
+    _consult = null;
+    _consultPending = false;
+    _primary = null;
+    _active = primary;
+    try {
+      consult?.hangup();
+    } catch (_) {}
+    _hold(primary, false);
+  }
+
+  @override
+  Future<void> setAudioDevices({
+    String? microphoneId,
+    String? speakerId,
+  }) async {
     final helper = _helper;
     if (helper is FsSipHelper) {
       helper.microphoneSourceId = microphoneId;
       helper.speakerDeviceId = speakerId;
     }
-    unawaited(_selectDevices(microphoneId, speakerId));
+    await _selectDevices(microphoneId, speakerId);
+  }
+
+  Call? get _talking => _active;
+
+  void _clearCalls() {
+    _mediaWatch?.cancel();
+    _mediaWatch = null;
+    _microphoneOpened.clear();
+    _active = null;
+    _ringing = null;
+    _primary = null;
+    _consult = null;
+    _consultPending = false;
+  }
+
+  void _armMediaWatch(Call call) {
+    _mediaWatch?.cancel();
+    var ticks = 0;
+    _mediaWatch = Timer.periodic(const Duration(milliseconds: 200), (timer) {
+      ticks++;
+      final stillHere = call.id == _active?.id ||
+          call.id == _consult?.id ||
+          call.id == _primary?.id;
+      if (!stillHere) {
+        timer.cancel();
+        return;
+      }
+      final ice = call.peerConnection?.iceConnectionState;
+      final ready =
+          ice == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          ice == RTCIceConnectionState.RTCIceConnectionStateCompleted;
+      if (ready || ticks >= 20) {
+        timer.cancel();
+        _mediaWatch = null;
+        unawaited(_announceReady(call));
+      }
+    });
+  }
+
+  Future<void> _announceReady(Call call) async {
+    await _ensureMicrophone(call);
+    final id = call.id;
+    if (id == _active?.id || id == _consult?.id || id == _primary?.id) {
+      _listener?.onMediaReady();
+    }
+  }
+
+  /// Opens the microphone as soon as the other party answers. Waiting for
+  /// ICE left the track silent for about twelve seconds, which is when the
+  /// old fallback restarted it.
+  Future<void> _ensureMicrophone(Call call, {bool retry = true}) async {
+    final id = call.id;
+    if (id == null || call.direction == Direction.incoming) {
+      return;
+    }
+    if (id != _active?.id && id != _consult?.id && id != _primary?.id) {
+      return;
+    }
+    if (_microphoneOpened.contains(id)) {
+      return;
+    }
+    _microphoneOpened.add(id);
+    final opened = await _restartMicrophone(call);
+    if (opened) {
+      return;
+    }
+    _microphoneOpened.remove(id);
+    if (!retry) {
+      return;
+    }
+    if (id != _active?.id && id != _consult?.id && id != _primary?.id) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    await _ensureMicrophone(call, retry: false);
+  }
+
+  Future<bool> _restartMicrophone(Call call) async {
+    final connection = call.peerConnection;
+    if (connection == null) {
+      return false;
+    }
+    final tracks = <MediaStreamTrack>[];
+    for (final MediaStream? stream in connection.getLocalStreams()) {
+      if (stream == null) {
+        continue;
+      }
+      tracks.addAll(stream.getAudioTracks());
+    }
+    if (tracks.isEmpty) {
+      return false;
+    }
+    // A disabled track is the mute button. Leave it alone.
+    if (tracks.any((MediaStreamTrack track) => !track.enabled)) {
+      return true;
+    }
+    for (final MediaStreamTrack track in tracks) {
+      track.enabled = false;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    final helper = _helper;
+    if (helper is FsSipHelper) {
+      await _selectDevices(helper.microphoneSourceId, null);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    final id = call.id;
+    if (id != _active?.id && id != _consult?.id && id != _primary?.id) {
+      return false;
+    }
+    for (final MediaStreamTrack track in tracks) {
+      track.enabled = true;
+    }
+    return true;
+  }
+
+  String _dial(String target) {
+    return target.contains('@') ? target : 'sip:$target@$_domain';
+  }
+
+  void _hold(Call? call, bool held) {
+    if (call == null) {
+      return;
+    }
+    try {
+      if (held) {
+        call.hold();
+      } else {
+        call.unhold();
+      }
+    } catch (_) {}
   }
 
   Future<void> _selectDevices(String? microphoneId, String? speakerId) async {
@@ -304,6 +568,10 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
             number: call.remote_identity ?? '',
             video: video,
           );
+        } else if (_consultPending) {
+          _consult = call;
+          _consultPending = false;
+          _active = call;
         } else if (_active != null || _listener?.acceptOutgoing() != true) {
           // A cancelled or extra INVITE must not stay up and ring later.
           call.hangup();
@@ -312,6 +580,25 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
         }
       case CallStateEnum.ENDED:
       case CallStateEnum.FAILED:
+        if (_consult?.id == call.id) {
+          _consult = null;
+          _consultPending = false;
+          if (_primary != null) {
+            _active = _primary;
+            _hold(_primary, false);
+            _listener?.onConsultEnded();
+          }
+          break;
+        }
+        if (_primary?.id == call.id) {
+          _primary = null;
+          final consult = _consult;
+          _consult = null;
+          _consultPending = false;
+          try {
+            consult?.hangup();
+          } catch (_) {}
+        }
         final endedActive = _active?.id == call.id;
         final endedRinging = _ringing?.id == call.id;
         if (endedRinging) {
@@ -323,14 +610,23 @@ class SofiaSoftphone extends Softphone implements SipUaHelperListener {
         if (endedActive || endedRinging) {
           _listener?.onCallEnded(_cause(state.cause));
         }
+      case CallStateEnum.ACCEPTED:
+      case CallStateEnum.CONFIRMED:
+        if (call.id == _active?.id ||
+            call.id == _consult?.id ||
+            call.id == _primary?.id) {
+          // Ringing and early media stay on "Calling…". The timer and
+          // "Connecting…" start only after the other party answers.
+          _listener?.onCallAccepted();
+          unawaited(_ensureMicrophone(call));
+          _armMediaWatch(call);
+        }
       case CallStateEnum.NONE:
       case CallStateEnum.STREAM:
       case CallStateEnum.UNMUTED:
       case CallStateEnum.MUTED:
       case CallStateEnum.CONNECTING:
       case CallStateEnum.PROGRESS:
-      case CallStateEnum.ACCEPTED:
-      case CallStateEnum.CONFIRMED:
       case CallStateEnum.REFER:
       case CallStateEnum.HOLD:
       case CallStateEnum.UNHOLD:

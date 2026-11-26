@@ -45,5 +45,23 @@ class TestSoftphone implements Softphone {
   void refer(String target) {}
 
   @override
-  void setAudioDevices({String? microphoneId, String? speakerId}) {}
+  Future<void> startConsult(String target) async {}
+
+  @override
+  void switchToCaller() {}
+
+  @override
+  void switchToConsult() {}
+
+  @override
+  void completeConsult(String target) {}
+
+  @override
+  void cancelConsult() {}
+
+  @override
+  Future<void> setAudioDevices({
+    String? microphoneId,
+    String? speakerId,
+  }) async {}
 }

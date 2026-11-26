@@ -15,6 +15,8 @@ void main() {
       expect(catalog.windowsDefaultName, 'Headset Microphone (Poly)');
       expect(catalog.windowsDefaultId, 'default-mic');
       expect(catalog.preferredId, 'poly');
+    expect(catalog.idForName('Headset Microphone (Poly)'), 'poly');
+    expect(catalog.idForLabel('Microphone (Realtek High Definition Audio)'), 'realtek');
       expect(catalog.devices.map((device) => device.id), ['poly', 'realtek']);
     },
   );

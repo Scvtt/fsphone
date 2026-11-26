@@ -37,6 +37,7 @@ class SettingsScreen extends StatelessWidget {
                 value: controller.microphoneId,
                 devices: controller.microphones,
                 windowsDefault: controller.windowsDefaultMicrophone,
+                consoleDefault: controller.consoleMicrophone,
                 onChanged: controller.setMicrophone,
               ),
               const SizedBox(height: 12),
@@ -45,6 +46,7 @@ class SettingsScreen extends StatelessWidget {
                 value: controller.speakerId,
                 devices: controller.speakers,
                 windowsDefault: controller.windowsDefaultSpeaker,
+                consoleDefault: controller.consoleSpeaker,
                 onChanged: controller.setSpeaker,
               ),
               const SizedBox(height: 8),
@@ -178,13 +180,18 @@ class SettingsScreen extends StatelessWidget {
     required String value,
     required List<AudioDevice> devices,
     required String windowsDefault,
+    required String consoleDefault,
     required ValueChanged<String> onChanged,
   }) {
     final known = devices.any((device) => device.id == value);
     final selected = known ? value : '';
     final defaultText = windowsDefault.isEmpty
-        ? 'Windows default has not been read yet.'
-        : 'Windows default: $windowsDefault';
+        ? 'Windows has not reported a communications device yet.'
+        : 'Windows communications device: $windowsDefault';
+    final consoleText =
+        consoleDefault.isNotEmpty && consoleDefault != windowsDefault
+        ? 'Windows default device: $consoleDefault'
+        : '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -194,13 +201,16 @@ class SettingsScreen extends StatelessWidget {
           isExpanded: true,
           decoration: InputDecoration(labelText: label),
           items: [
-            const DropdownMenuItem(value: '', child: Text('Windows default')),
+            const DropdownMenuItem(
+              value: '',
+              child: Text('Windows communications device'),
+            ),
             for (final device in devices)
               DropdownMenuItem(
                 value: device.id,
                 child: Text(
                   device.label == windowsDefault
-                      ? '${device.label} (Windows default)'
+                      ? '${device.label} (communications)'
                       : device.label,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -217,6 +227,11 @@ class SettingsScreen extends StatelessWidget {
           defaultText,
           style: const TextStyle(color: FsColors.muted, fontSize: 12),
         ),
+        if (consoleText.isNotEmpty)
+          Text(
+            consoleText,
+            style: const TextStyle(color: FsColors.muted, fontSize: 12),
+          ),
       ],
     );
   }

@@ -106,6 +106,10 @@ class ActiveCall {
   final CallDirection direction;
   CallMedia media;
   final DateTime started;
+
+  /// Set once RTP is flowing. Until then the screen says Calling or Connecting.
+  DateTime? connectedAt;
+  bool connecting = false;
   bool muted = false;
   bool held = false;
   bool recording = false;
@@ -119,7 +123,9 @@ class ActiveCall {
   String? consultName;
   String? consultNumber;
 
-  Duration elapsed(DateTime now) => now.difference(started);
+  bool get live => connectedAt != null;
+
+  Duration elapsed(DateTime now) => now.difference(connectedAt ?? started);
 }
 
 String formatClock(DateTime time) {

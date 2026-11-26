@@ -191,7 +191,9 @@ class _ReturnToCall extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final call = controller.call!;
-    final label = call.consulting
+    final label = !call.live
+        ? (call.connecting ? 'Connecting…' : 'Calling…')
+        : call.consulting
         ? 'Consulting ${call.consultName}'
         : call.name;
     return Material(
@@ -206,7 +208,9 @@ class _ReturnToCall extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '$label · ${formatDuration(call.elapsed(DateTime.now()))}',
+                  call.live
+                      ? '$label · ${formatDuration(call.elapsed(DateTime.now()))}'
+                      : label,
                 ),
               ),
               const Text(

@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:fsphone/audio/saved_audio.dart';
 import 'package:fsphone/audio/windows_audio.dart';
+import 'package:fsphone/audio/windows_endpoints.dart';
 import 'package:fsphone/auth/saved_login.dart';
 import 'package:fsphone/models/phone_models.dart';
 import 'package:fsphone/sip/softphone.dart';
@@ -43,13 +45,18 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
   String turnServer = '';
   String turnUsername = '';
 
-  /// Empty means follow the Windows default.
+  /// Empty means follow the Windows communications device.
   String microphoneId = '';
   String speakerId = '';
+  String _microphoneLabel = '';
+  String _speakerLabel = '';
+  bool _audioChoiceLoaded = false;
   List<AudioDevice> microphones = const <AudioDevice>[];
   List<AudioDevice> speakers = const <AudioDevice>[];
   String windowsDefaultMicrophone = '';
   String windowsDefaultSpeaker = '';
+  String consoleMicrophone = '';
+  String consoleSpeaker = '';
   String? defaultMicrophoneId;
   String? defaultSpeakerId;
   String? audioDeviceError;
@@ -367,6 +374,7 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
       started: DateTime.now(),
       direction: direction,
     );
+    call!.connecting = !sendInvite;
     section = ShellSection.dialer;
     _ensureTicker();
     notifyListeners();
@@ -499,13 +507,13 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
       return;
     }
     current.held = true;
-    _softphone.setHeld(true);
     current.consulting = true;
     current.consultName = name;
     current.consultNumber = number;
     current.consultOnHold = false;
     current.showKeypad = false;
     notifyListeners();
+    unawaited(_softphone.startConsult(number));
   }
 
   /// Leave the consulted party on hold and talk to the original caller again.
@@ -516,7 +524,7 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     }
     current.consultOnHold = true;
     current.held = false;
-    _softphone.setHeld(false);
+    _softphone.switchToCaller();
     notifyListeners();
   }
 
@@ -528,7 +536,7 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     }
     current.consultOnHold = false;
     current.held = true;
-    _softphone.setHeld(true);
+    _softphone.switchToConsult();
     notifyListeners();
   }
 
@@ -547,7 +555,7 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
       detail: 'Attended transfer to ${current.consultName}',
     );
     if (current.consultNumber != null) {
-      _softphone.refer(current.consultNumber!);
+      _softphone.completeConsult(current.consultNumber!);
     }
     call = null;
     _ticker?.cancel();
@@ -566,7 +574,42 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     current.consultName = null;
     current.consultNumber = null;
     current.held = false;
-    _softphone.setHeld(false);
+    _softphone.cancelConsult();
+    notifyListeners();
+  }
+
+  @override
+  void onConsultEnded() {
+    final current = call;
+    if (current == null || !current.consulting) {
+      return;
+    }
+    current.consulting = false;
+    current.consultOnHold = false;
+    current.consultName = null;
+    current.consultNumber = null;
+    current.held = false;
+    notifyListeners();
+  }
+
+  @override
+  void onCallAccepted() {
+    final current = call;
+    if (current == null || current.live) {
+      return;
+    }
+    current.connecting = true;
+    notifyListeners();
+  }
+
+  @override
+  void onMediaReady() {
+    final current = call;
+    if (current == null || current.live) {
+      return;
+    }
+    current.connecting = false;
+    current.connectedAt = DateTime.now();
     notifyListeners();
   }
 
@@ -737,43 +780,108 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
 
   void setMicrophone(String value) {
     microphoneId = value;
-    _pushAudioDevices();
+    _microphoneLabel = _labelFor(microphones, value);
+    unawaited(_rememberAudio());
+    unawaited(_pushAudioDevices());
     notifyListeners();
   }
 
   void setSpeaker(String value) {
     speakerId = value;
-    _pushAudioDevices();
+    _speakerLabel = _labelFor(speakers, value);
+    unawaited(_rememberAudio());
+    unawaited(_pushAudioDevices());
     notifyListeners();
+  }
+
+  Future<void> restoreAudioChoice() async {
+    final saved = await SavedAudio.read();
+    _audioChoiceLoaded = true;
+    if (saved == null) {
+      return;
+    }
+    _microphoneLabel = saved.microphoneLabel;
+    _speakerLabel = saved.speakerLabel;
   }
 
   Future<void> refreshAudioDevices() async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) {
       return;
     }
+    if (!_audioChoiceLoaded) {
+      await restoreAudioChoice();
+    }
     try {
       final inputs = await WindowsAudio.microphones();
       final outputs = await WindowsAudio.speakers();
+      final inputRoles = WindowsEndpoints.microphones();
+      final outputRoles = WindowsEndpoints.speakers();
       microphones = inputs.devices;
       speakers = outputs.devices;
-      windowsDefaultMicrophone = inputs.windowsDefaultName;
-      windowsDefaultSpeaker = outputs.windowsDefaultName;
-      defaultMicrophoneId = inputs.preferredId;
-      defaultSpeakerId = outputs.preferredId;
-      if (microphoneId.isNotEmpty &&
-          !microphones.any((device) => device.id == microphoneId)) {
-        microphoneId = '';
-      }
-      if (speakerId.isNotEmpty &&
-          !speakers.any((device) => device.id == speakerId)) {
-        speakerId = '';
-      }
+      consoleMicrophone = _roleName(
+        inputRoles?.console,
+        inputs.windowsDefaultName,
+      );
+      consoleSpeaker = _roleName(
+        outputRoles?.console,
+        outputs.windowsDefaultName,
+      );
+      windowsDefaultMicrophone = _roleName(
+        inputRoles?.communications,
+        consoleMicrophone,
+      );
+      windowsDefaultSpeaker = _roleName(
+        outputRoles?.communications,
+        consoleSpeaker,
+      );
+      defaultMicrophoneId = inputs.idForName(windowsDefaultMicrophone);
+      defaultSpeakerId = outputs.idForName(windowsDefaultSpeaker);
+      microphoneId = _resolveChoice(microphones, _microphoneLabel);
+      speakerId = _resolveChoice(speakers, _speakerLabel);
       audioDeviceError = null;
-      _pushAudioDevices();
+      await _pushAudioDevices();
     } catch (_) {
       audioDeviceError = 'Could not read the Windows audio devices.';
     }
     notifyListeners();
+  }
+
+  String _roleName(String? live, String fallback) {
+    final name = live?.trim() ?? '';
+    return name.isEmpty ? fallback : name;
+  }
+
+  String _labelFor(List<AudioDevice> devices, String id) {
+    if (id.isEmpty) {
+      return '';
+    }
+    for (final device in devices) {
+      if (device.id == id) {
+        return device.label;
+      }
+    }
+    return '';
+  }
+
+  String _resolveChoice(List<AudioDevice> devices, String label) {
+    if (label.isEmpty) {
+      return '';
+    }
+    for (final device in devices) {
+      if (device.label.toLowerCase() == label.toLowerCase()) {
+        return device.id;
+      }
+    }
+    return '';
+  }
+
+  Future<void> _rememberAudio() {
+    return SavedAudio.write(
+      SavedAudio(
+        microphoneLabel: _microphoneLabel,
+        speakerLabel: _speakerLabel,
+      ),
+    );
   }
 
   Future<void> _prepareAudio() async {
@@ -781,11 +889,11 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
       await refreshAudioDevices();
       return;
     }
-    _pushAudioDevices();
+    await _pushAudioDevices();
   }
 
-  void _pushAudioDevices() {
-    _softphone.setAudioDevices(
+  Future<void> _pushAudioDevices() {
+    return _softphone.setAudioDevices(
       microphoneId: microphoneId.isEmpty ? defaultMicrophoneId : microphoneId,
       speakerId: speakerId.isEmpty ? defaultSpeakerId : speakerId,
     );

@@ -32,7 +32,9 @@ class _FsPhoneAppState extends State<FsPhoneApp> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DesktopAlerts.start(_controller);
-      _controller.refreshAudioDevices();
+      _controller.restoreAudioChoice().then((_) {
+        return _controller.refreshAudioDevices();
+      });
       _controller.restoreSignIn();
     });
   }

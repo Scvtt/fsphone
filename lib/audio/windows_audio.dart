@@ -22,6 +22,38 @@ class AudioCatalog {
   final String windowsDefaultName;
   final String? windowsDefaultId;
 
+  /// Physical device that matches [name]. The role entry named "Default - …"
+  /// is not a real capture device, so the Windows friendly name is matched
+  /// against the real endpoints.
+  String? idForName(String name) {
+    final wanted = name.trim().toLowerCase();
+    if (wanted.isEmpty) {
+      return preferredId;
+    }
+    for (final device in devices) {
+      if (device.label.toLowerCase() == wanted) {
+        return device.id;
+      }
+    }
+    for (final device in devices) {
+      final label = device.label.toLowerCase();
+      if (label.contains(wanted) || wanted.contains(label)) {
+        return device.id;
+      }
+    }
+    return preferredId;
+  }
+
+  String? idForLabel(String label) {
+    final wanted = label.trim().toLowerCase();
+    for (final device in devices) {
+      if (device.label.toLowerCase() == wanted) {
+        return device.id;
+      }
+    }
+    return null;
+  }
+
   /// Physical device that matches the Windows default. The role entry named
   /// "Default - …" is not a real capture device.
   String? get preferredId {

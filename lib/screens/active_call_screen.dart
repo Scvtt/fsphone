@@ -74,10 +74,14 @@ class ActiveCallScreen extends StatelessWidget {
                 Text(subtitle, style: const TextStyle(color: FsColors.muted)),
                 const SizedBox(height: 6),
                 Text(
-                  elapsed,
-                  style: const TextStyle(
+                  call.live
+                      ? elapsed
+                      : (call.connecting ? 'Connecting…' : 'Calling…'),
+                  style: TextStyle(
                     fontSize: 18,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                    color: call.live ? null : FsColors.accent,
+                    fontWeight: call.live ? null : FontWeight.w600,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
                 if (call.dtmf.isNotEmpty) ...[
