@@ -130,7 +130,7 @@ class _TopBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    registered ? 'Registered · WSS' : 'Not registered',
+                    registered ? 'Registered' : 'Not registered',
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ],
