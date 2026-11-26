@@ -169,7 +169,7 @@ class _NavButton extends StatelessWidget {
           onTap: onTap,
           hoverColor: FsColors.navHover,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Column(
               children: [
                 Badge(
