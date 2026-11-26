@@ -74,7 +74,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
   Future<void> Function(IncomingCall call)? presentIncoming;
 
   Timer? _ticker;
-  Timer? _setupWatch;
   Future<void>? _audioRefresh;
   int _id = 0;
   int _dialGeneration = 0;
@@ -388,7 +387,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     if (!sendInvite) {
       return;
     }
-    _armSetupWatch();
     final sent = await _softphone.invite(
       number,
       video: media == CallMedia.video,
@@ -410,7 +408,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     if (current == null) {
       return;
     }
-    _cancelSetupWatch();
     _dialGeneration++;
     _endingLocally = true;
     try {
@@ -493,7 +490,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     if (current == null) {
       return;
     }
-    _cancelSetupWatch();
     _endingLocally = true;
     _softphone.refer(number);
     _pushRecent(
@@ -555,7 +551,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     if (current == null || !current.consulting) {
       return;
     }
-    _cancelSetupWatch();
     _endingLocally = true;
     _pushRecent(
       name: current.name,
@@ -604,13 +599,7 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
   }
 
   @override
-  void onInviteSent() {
-    _cancelSetupWatch();
-  }
-
-  @override
   void onCallAccepted() {
-    _cancelSetupWatch();
     final current = call;
     if (current == null || current.live) {
       return;
@@ -718,7 +707,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
 
   @override
   void onCallEnded(String reason) {
-    _cancelSetupWatch();
     final ringing = incoming;
     if (ringing != null && call == null) {
       incoming = null;
@@ -925,25 +913,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
     await _pushAudioDevices();
   }
 
-  void _armSetupWatch() {
-    _setupWatch?.cancel();
-    _setupWatch = Timer(const Duration(seconds: 12), () {
-      _setupWatch = null;
-      if (call == null) {
-        return;
-      }
-      hangUp(record: false);
-      statusMessage =
-          'The call could not be sent yet. Wait a moment and try again.';
-      notifyListeners();
-    });
-  }
-
-  void _cancelSetupWatch() {
-    _setupWatch?.cancel();
-    _setupWatch = null;
-  }
-
   Future<void> _pushAudioDevices() {
     return _softphone.setAudioDevices(
       microphoneId: microphoneId.isEmpty ? defaultMicrophoneId : microphoneId,
@@ -986,7 +955,6 @@ class PhoneController extends ChangeNotifier implements SoftphoneListener {
 
   @override
   void dispose() {
-    _cancelSetupWatch();
     _ticker?.cancel();
     unawaited(_softphone.disconnect());
     super.dispose();
