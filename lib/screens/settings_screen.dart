@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:fsphone/audio/windows_audio.dart';
 import 'package:fsphone/state/phone_controller.dart';
 import 'package:fsphone/theme/fs_colors.dart';
 
@@ -33,29 +34,39 @@ class SettingsScreen extends StatelessWidget {
             children: [
               _devicePicker(
                 label: 'Microphone',
-                value: controller.microphone,
-                options: const [
-                  'Default microphone',
-                  'Headset microphone',
-                  'USB phone',
-                ],
+                value: controller.microphoneId,
+                devices: controller.microphones,
+                windowsDefault: controller.windowsDefaultMicrophone,
                 onChanged: controller.setMicrophone,
               ),
               const SizedBox(height: 12),
               _devicePicker(
                 label: 'Speaker',
-                value: controller.speaker,
-                options: const ['Default speaker', 'Headset', 'Desk speakers'],
+                value: controller.speakerId,
+                devices: controller.speakers,
+                windowsDefault: controller.windowsDefaultSpeaker,
                 onChanged: controller.setSpeaker,
               ),
               const SizedBox(height: 8),
-              const Align(
+              Align(
                 alignment: Alignment.centerLeft,
-                child: Text(
-                  'Device names are placeholders until the Windows audio path is connected.',
-                  style: TextStyle(color: FsColors.muted, fontSize: 12),
+                child: TextButton.icon(
+                  onPressed: controller.refreshAudioDevices,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Refresh devices'),
                 ),
               ),
+              if (controller.audioDeviceError != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    controller.audioDeviceError!,
+                    style: const TextStyle(
+                      color: FsColors.missed,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -117,16 +128,7 @@ class SettingsScreen extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 title: Text('Incoming-call alerts'),
                 subtitle: Text(
-                  'When this window is minimized or off-screen, an incoming call raises a Windows toast in the bottom-right with Answer and Decline. The Windows audio path is not connected, so this is the alert only.',
-                ),
-              ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  key: const Key('simulate-incoming'),
-                  onPressed: controller.simulateIncomingCall,
-                  icon: const Icon(Icons.notifications_active_outlined),
-                  label: const Text('Simulate incoming call'),
+                  'An incoming call rings. While this window is in the background, a card at the bottom-right of the screen offers Answer and Hang up. Closing the window leaves the app in the tray. Click the tray icon for Show FS Phone and Exit.',
                 ),
               ),
             ],
@@ -174,21 +176,48 @@ class SettingsScreen extends StatelessWidget {
   Widget _devicePicker({
     required String label,
     required String value,
-    required List<String> options,
+    required List<AudioDevice> devices,
+    required String windowsDefault,
     required ValueChanged<String> onChanged,
   }) {
-    return DropdownButtonFormField<String>(
-      initialValue: value,
-      decoration: InputDecoration(labelText: label),
-      items: [
-        for (final option in options)
-          DropdownMenuItem(value: option, child: Text(option)),
+    final known = devices.any((device) => device.id == value);
+    final selected = known ? value : '';
+    final defaultText = windowsDefault.isEmpty
+        ? 'Windows default has not been read yet.'
+        : 'Windows default: $windowsDefault';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          key: ValueKey('$label-$selected-${devices.length}'),
+          initialValue: selected,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: label),
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Windows default')),
+            for (final device in devices)
+              DropdownMenuItem(
+                value: device.id,
+                child: Text(
+                  device.label == windowsDefault
+                      ? '${device.label} (Windows default)'
+                      : device.label,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: (next) {
+            if (next != null) {
+              onChanged(next);
+            }
+          },
+        ),
+        const SizedBox(height: 4),
+        Text(
+          defaultText,
+          style: const TextStyle(color: FsColors.muted, fontSize: 12),
+        ),
       ],
-      onChanged: (next) {
-        if (next != null) {
-          onChanged(next);
-        }
-      },
     );
   }
 }

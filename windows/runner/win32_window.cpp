@@ -2,8 +2,70 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <shellapi.h>
 
 #include "resource.h"
+
+namespace {
+
+constexpr UINT kTrayCallback = WM_APP + 20;
+constexpr UINT kTrayIconId = 1;
+constexpr UINT kTrayShow = 1;
+constexpr UINT kTrayExit = 2;
+
+void AddTrayIcon(HWND hwnd) {
+  NOTIFYICONDATAW icon = {};
+  icon.cbSize = sizeof(icon);
+  icon.hWnd = hwnd;
+  icon.uID = kTrayIconId;
+  icon.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+  icon.uCallbackMessage = kTrayCallback;
+  icon.hIcon = static_cast<HICON>(LoadImage(
+      GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, 0, 0,
+      LR_DEFAULTSIZE));
+  wcscpy_s(icon.szTip, L"FS Phone");
+  Shell_NotifyIconW(NIM_ADD, &icon);
+}
+
+void RemoveTrayIcon(HWND hwnd) {
+  NOTIFYICONDATAW icon = {};
+  icon.cbSize = sizeof(icon);
+  icon.hWnd = hwnd;
+  icon.uID = kTrayIconId;
+  Shell_NotifyIconW(NIM_DELETE, &icon);
+}
+
+void ShowMainWindow(HWND hwnd) {
+  ShowWindow(hwnd, SW_SHOW);
+  if (IsIconic(hwnd)) {
+    ShowWindow(hwnd, SW_RESTORE);
+  }
+  SetForegroundWindow(hwnd);
+}
+
+void ShowTrayMenu(HWND hwnd) {
+  HMENU menu = CreatePopupMenu();
+  AppendMenuW(menu, MF_STRING, kTrayShow, L"Show FS Phone");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(menu, MF_STRING, kTrayExit, L"Exit");
+  POINT cursor = {};
+  GetCursorPos(&cursor);
+  SetForegroundWindow(hwnd);
+  const UINT command = TrackPopupMenu(
+      menu, TPM_RIGHTALIGN | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+      cursor.x, cursor.y, 0, hwnd, nullptr);
+  DestroyMenu(menu);
+  PostMessage(hwnd, WM_NULL, 0, 0);
+  if (command == kTrayShow) {
+    ShowMainWindow(hwnd);
+  } else if (command == kTrayExit) {
+    SetProp(hwnd, L"FsPhoneQuitOnClose", reinterpret_cast<HANDLE>(1));
+    RemoveTrayIcon(hwnd);
+    SendMessage(hwnd, WM_CLOSE, 0, 0);
+  }
+}
+
+}  // namespace
 
 namespace {
 
@@ -145,6 +207,7 @@ bool Win32Window::Create(const std::wstring& title,
   }
 
   UpdateTheme(window);
+  AddTrayIcon(window);
 
   return OnCreate();
 }
@@ -186,7 +249,24 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
     }
 
+    case WM_CLOSE:
+      if (GetProp(hwnd, L"FsPhoneQuitOnClose") == nullptr) {
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+      }
+      break;
+
+    case kTrayCallback:
+      if (lparam == WM_LBUTTONDBLCLK) {
+        ShowMainWindow(hwnd);
+      } else if (lparam == WM_RBUTTONUP || lparam == WM_CONTEXTMENU ||
+                 lparam == WM_LBUTTONUP) {
+        ShowTrayMenu(hwnd);
+      }
+      return 0;
+
     case WM_DESTROY:
+      RemoveTrayIcon(hwnd);
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {

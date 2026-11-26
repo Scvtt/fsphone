@@ -98,10 +98,12 @@ class ActiveCall {
     required this.number,
     required this.media,
     required this.started,
+    this.direction = CallDirection.outgoing,
   });
 
   String name;
   final String number;
+  final CallDirection direction;
   CallMedia media;
   final DateTime started;
   bool muted = false;

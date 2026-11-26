@@ -39,6 +39,10 @@ dependencies:
   local_notifier: ^0.1.6
   tray_manager: ^0.9.1
   window_manager: ^0.7.1
+  sip_ua: ^1.1.0
+  flutter_webrtc: ^1.6.3
+  shared_preferences: ^2.5.3
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_test:

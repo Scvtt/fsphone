@@ -107,27 +107,34 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: registered
-                  ? const Color(0xFFE7F6EE)
-                  : const Color(0xFFFFF6E8),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.circle,
-                  size: 8,
-                  color: registered ? FsColors.available : FsColors.away,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  registered ? 'Registered · WSS' : 'Not registered',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ],
+          Tooltip(
+            message:
+                controller.statusMessage ??
+                (registered
+                    ? 'Registered with the PBX'
+                    : 'Not registered with the PBX'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: registered
+                    ? const Color(0xFFE7F6EE)
+                    : const Color(0xFFFFF6E8),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.circle,
+                    size: 8,
+                    color: registered ? FsColors.available : FsColors.away,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    registered ? 'Registered · WSS' : 'Not registered',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

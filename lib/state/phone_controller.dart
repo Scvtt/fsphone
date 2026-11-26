@@ -1,32 +1,58 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:fsphone/data/sample_directory.dart';
+import 'package:fsphone/audio/windows_audio.dart';
+import 'package:fsphone/auth/saved_login.dart';
 import 'package:fsphone/models/phone_models.dart';
+import 'package:fsphone/sip/softphone.dart';
 
-/// In-memory desktop session. Login, calls, and settings are local so the
-/// Windows UI can be tested before WSS registration and media exist.
-class PhoneController extends ChangeNotifier {
-  PhoneController()
-    : contacts = sampleContacts(),
-      recents = sampleRecents(DateTime.now()),
-      voicemails = sampleVoicemail(DateTime.now());
+/// Desktop session. Sign-in registers with FreeSWITCH over WSS. Calls are
+/// real SIP dialogs. Contacts, recents, and voicemail start empty and only
+/// grow from calls this session actually places or receives.
+class PhoneController extends ChangeNotifier implements SoftphoneListener {
+  PhoneController({Softphone? softphone})
+    : _softphone = softphone ?? SofiaSoftphone(),
+      contacts = <DirectoryContact>[],
+      recents = <RecentCall>[],
+      voicemails = <VoicemailMessage>[] {
+    _softphone.listener = this;
+  }
+
+  final Softphone _softphone;
+  Completer<String?>? _registerResult;
+  bool _endingLocally = false;
 
   bool signedIn = false;
-  String displayName = 'Test user';
+  bool sipRegistered = false;
+  String? statusMessage;
+  String displayName = '';
   String extension = '';
   String server = '';
+  String sipDomain = '';
+  bool allowBadCertificate = true;
+  bool restoring = false;
+  SavedLogin? remembered;
   PresenceStatus presence = PresenceStatus.available;
   ShellSection section = ShellSection.dialer;
   String dialed = '';
   String search = '';
   bool stayRegistered = true;
   bool runInBackground = true;
-  String stunServer = 'stun:stun.example.com:3478';
-  String turnServer = 'turn:turn.example.com:3478';
+  String stunServer = 'stun:stun.l.google.com:19302';
+  String turnServer = '';
   String turnUsername = '';
-  String microphone = 'Default microphone';
-  String speaker = 'Default speaker';
+
+  /// Empty means follow the Windows default.
+  String microphoneId = '';
+  String speakerId = '';
+  List<AudioDevice> microphones = const <AudioDevice>[];
+  List<AudioDevice> speakers = const <AudioDevice>[];
+  String windowsDefaultMicrophone = '';
+  String windowsDefaultSpeaker = '';
+  String? defaultMicrophoneId;
+  String? defaultSpeakerId;
+  String? audioDeviceError;
   bool missedSeen = false;
 
   final List<DirectoryContact> contacts;
@@ -42,6 +68,7 @@ class PhoneController extends ChangeNotifier {
 
   Timer? _ticker;
   int _id = 0;
+  int _dialGeneration = 0;
 
   int get missedCount => missedSeen
       ? 0
@@ -50,29 +77,128 @@ class PhoneController extends ChangeNotifier {
   int get unreadVoicemail =>
       voicemails.where((message) => message.unread).length;
 
-  bool get registered => signedIn && stayRegistered;
+  bool get registered => signedIn && stayRegistered && sipRegistered;
 
-  void signIn({
+  /// Registers with the PBX. Returns an error string, or null once Sofia
+  /// accepts the REGISTER.
+  Future<String?> signIn({
     required String displayServer,
     required String displayExtension,
-  }) {
-    server = displayServer.trim();
-    extension = displayExtension.trim();
-    displayName = 'Test user';
+    required String password,
+    required String domain,
+    required bool trustAnyCertificate,
+  }) async {
+    final websocket = displayServer.trim();
+    final ext = displayExtension.trim();
+    final host = _domainFor(websocket, domain);
+    if (host.isEmpty) {
+      return 'The WebSocket address has no host.';
+    }
+    server = websocket;
+    extension = ext;
+    sipDomain = host;
+    allowBadCertificate = trustAnyCertificate;
+    displayName = ext;
+    statusMessage = 'Registering…';
+    notifyListeners();
+
+    final result = Completer<String?>();
+    _registerResult = result;
+    final ice = <Map<String, String>>[
+      <String, String>{'urls': stunServer.trim()},
+    ];
+    if (turnServer.trim().isNotEmpty) {
+      ice.add(<String, String>{
+        'urls': turnServer.trim(),
+        'username': turnUsername.trim(),
+        'credential': '',
+      });
+    }
+    try {
+      await _softphone.connect(
+        SipAccount(
+          webSocketUrl: websocket,
+          extension: ext,
+          password: password,
+          domain: host,
+          allowBadCertificate: trustAnyCertificate,
+          iceServers: ice,
+        ),
+      );
+    } catch (error) {
+      _registerResult = null;
+      statusMessage = 'Could not open the WebSocket.';
+      notifyListeners();
+      return statusMessage;
+    }
+    final error = await result.future.timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => 'Registration timed out. Check the WebSocket address, certificate, and extension password.',
+    );
+    if (error != null) {
+      statusMessage = error;
+      sipRegistered = false;
+      notifyListeners();
+      return error;
+    }
     signedIn = true;
     section = ShellSection.dialer;
     dialed = '';
     search = '';
+    statusMessage = null;
+    final saved = SavedLogin(
+      server: websocket,
+      domain: domain.trim(),
+      extension: ext,
+      password: password,
+      trustAnyCertificate: trustAnyCertificate,
+    );
+    remembered = saved;
+    notifyListeners();
+    await SavedLogin.write(saved);
+    return null;
+  }
+
+  /// Registers again with the account saved on this PC.
+  Future<void> restoreSignIn() async {
+    final saved = await SavedLogin.read();
+    if (saved == null || signedIn) {
+      return;
+    }
+    remembered = saved;
+    restoring = true;
+    notifyListeners();
+    await signIn(
+      displayServer: saved.server,
+      displayExtension: saved.extension,
+      password: saved.password,
+      domain: saved.domain,
+      trustAnyCertificate: saved.trustAnyCertificate,
+    );
+    restoring = false;
     notifyListeners();
   }
 
   void signOut() {
     hangUp(record: false);
     signedIn = false;
+    sipRegistered = false;
+    statusMessage = null;
+    remembered = null;
     dialed = '';
     search = '';
     section = ShellSection.dialer;
     notifyListeners();
+    unawaited(_softphone.disconnect());
+    unawaited(SavedLogin.clear());
+  }
+
+  String _domainFor(String websocket, String override) {
+    final typed = override.trim();
+    if (typed.isNotEmpty) {
+      return typed;
+    }
+    return Uri.tryParse(websocket)?.host ?? '';
   }
 
   void setPresence(PresenceStatus value) {
@@ -91,6 +217,9 @@ class PhoneController extends ChangeNotifier {
         message.unread = false;
       }
     }
+    if (next == ShellSection.settings) {
+      unawaited(refreshAudioDevices());
+    }
     notifyListeners();
   }
 
@@ -103,6 +232,7 @@ class PhoneController extends ChangeNotifier {
     if (call != null) {
       if (call!.showKeypad) {
         call!.dtmf += digit;
+        _softphone.sendDtmf(digit);
         notifyListeners();
       }
       return;
@@ -208,9 +338,25 @@ class PhoneController extends ChangeNotifier {
         .toList();
   }
 
-  void placeCall(String raw, {required CallMedia media, String? name}) {
+  Future<void> placeCall(
+    String raw, {
+    required CallMedia media,
+    String? name,
+    CallDirection direction = CallDirection.outgoing,
+    bool sendInvite = true,
+  }) async {
     final number = raw.trim();
     if (number.isEmpty || call != null) {
+      return;
+    }
+    if (sendInvite && !sipRegistered) {
+      statusMessage = 'Not registered with the PBX.';
+      notifyListeners();
+      return;
+    }
+    final generation = ++_dialGeneration;
+    await _prepareAudio();
+    if (generation != _dialGeneration || call != null) {
       return;
     }
     final known = name ?? contactFor(number)?.name ?? number;
@@ -219,10 +365,28 @@ class PhoneController extends ChangeNotifier {
       number: number,
       media: media,
       started: DateTime.now(),
+      direction: direction,
     );
     section = ShellSection.dialer;
     _ensureTicker();
     notifyListeners();
+    if (!sendInvite) {
+      return;
+    }
+    final sent = await _softphone.invite(
+      number,
+      video: media == CallMedia.video,
+    );
+    if (generation != _dialGeneration) {
+      _softphone.hangup();
+      return;
+    }
+    if (!sent && call != null) {
+      hangUp(record: false);
+      statusMessage =
+          'The WebSocket is not connected, so the call was not sent.';
+      notifyListeners();
+    }
   }
 
   void hangUp({bool record = true}) {
@@ -230,7 +394,10 @@ class PhoneController extends ChangeNotifier {
     if (current == null) {
       return;
     }
+    _dialGeneration++;
+    _endingLocally = true;
     try {
+      _softphone.hangup();
       if (record) {
         final detail = current.consulting
             ? 'Consult with ${current.consultName} cancelled'
@@ -238,7 +405,7 @@ class PhoneController extends ChangeNotifier {
         _pushRecent(
           name: current.name,
           number: current.number,
-          direction: CallDirection.outgoing,
+          direction: current.direction,
           media: current.media,
           length: current.elapsed(DateTime.now()),
           detail: detail,
@@ -250,6 +417,7 @@ class PhoneController extends ChangeNotifier {
       call = null;
       _ticker?.cancel();
       _ticker = null;
+      _endingLocally = false;
       notifyListeners();
     }
   }
@@ -260,6 +428,7 @@ class PhoneController extends ChangeNotifier {
       return;
     }
     current.muted = !current.muted;
+    _softphone.setMuted(current.muted);
     notifyListeners();
   }
 
@@ -269,6 +438,7 @@ class PhoneController extends ChangeNotifier {
       return;
     }
     current.held = !current.held;
+    _softphone.setHeld(current.held);
     notifyListeners();
   }
 
@@ -306,10 +476,12 @@ class PhoneController extends ChangeNotifier {
     if (current == null) {
       return;
     }
+    _endingLocally = true;
+    _softphone.refer(number);
     _pushRecent(
       name: current.name,
       number: current.number,
-      direction: CallDirection.outgoing,
+      direction: current.direction,
       media: current.media,
       length: current.elapsed(DateTime.now()),
       detail: 'Blind transfer to $name',
@@ -317,6 +489,7 @@ class PhoneController extends ChangeNotifier {
     call = null;
     _ticker?.cancel();
     _ticker = null;
+    _endingLocally = false;
     notifyListeners();
   }
 
@@ -326,6 +499,7 @@ class PhoneController extends ChangeNotifier {
       return;
     }
     current.held = true;
+    _softphone.setHeld(true);
     current.consulting = true;
     current.consultName = name;
     current.consultNumber = number;
@@ -342,6 +516,7 @@ class PhoneController extends ChangeNotifier {
     }
     current.consultOnHold = true;
     current.held = false;
+    _softphone.setHeld(false);
     notifyListeners();
   }
 
@@ -353,6 +528,7 @@ class PhoneController extends ChangeNotifier {
     }
     current.consultOnHold = false;
     current.held = true;
+    _softphone.setHeld(true);
     notifyListeners();
   }
 
@@ -361,17 +537,22 @@ class PhoneController extends ChangeNotifier {
     if (current == null || !current.consulting) {
       return;
     }
+    _endingLocally = true;
     _pushRecent(
       name: current.name,
       number: current.number,
-      direction: CallDirection.outgoing,
+      direction: current.direction,
       media: current.media,
       length: current.elapsed(DateTime.now()),
       detail: 'Attended transfer to ${current.consultName}',
     );
+    if (current.consultNumber != null) {
+      _softphone.refer(current.consultNumber!);
+    }
     call = null;
     _ticker?.cancel();
     _ticker = null;
+    _endingLocally = false;
     notifyListeners();
   }
 
@@ -385,38 +566,127 @@ class PhoneController extends ChangeNotifier {
     current.consultName = null;
     current.consultNumber = null;
     current.held = false;
+    _softphone.setHeld(false);
     notifyListeners();
   }
 
-  /// Raises a test incoming call. Audio is not connected; the shell shows the
-  /// call, and Windows shows a toast when the window is not in front.
-  void simulateIncomingCall() {
-    final ringing = IncomingCall(
-      name: contacts.first.name,
-      number: contacts.first.extension,
-    );
-    incoming = ringing;
-    notifyListeners();
-    presentIncoming?.call(ringing);
-  }
-
-  void answerIncoming() {
+  Future<void> answerIncoming() async {
     final ringing = incoming;
     if (ringing == null) {
       return;
     }
     incoming = null;
-    if (call != null) {
-      hangUp();
-    }
-    placeCall(ringing.number, media: CallMedia.voice, name: ringing.name);
+    notifyListeners();
+    await _prepareAudio();
+    _softphone.answer(video: false);
+    final number = ringing.number.trim().isEmpty
+        ? ringing.name
+        : ringing.number;
+    placeCall(
+      number,
+      media: CallMedia.voice,
+      name: ringing.name,
+      direction: CallDirection.incoming,
+      sendInvite: false,
+    );
   }
 
   void declineIncoming() {
-    if (incoming == null) {
+    final ringing = incoming;
+    if (ringing == null) {
       return;
     }
     incoming = null;
+    _softphone.decline();
+    _pushRecent(
+      name: ringing.name,
+      number: ringing.number,
+      direction: CallDirection.missed,
+      media: CallMedia.voice,
+      length: Duration.zero,
+    );
+    notifyListeners();
+  }
+
+  @override
+  void onRegistered() {
+    sipRegistered = true;
+    statusMessage = null;
+    final pending = _registerResult;
+    _registerResult = null;
+    if (pending != null && !pending.isCompleted) {
+      pending.complete(null);
+    }
+    notifyListeners();
+  }
+
+  @override
+  void onRegistrationFailed(String message) {
+    sipRegistered = false;
+    statusMessage = message;
+    final pending = _registerResult;
+    _registerResult = null;
+    if (pending != null && !pending.isCompleted) {
+      pending.complete(message);
+    }
+    notifyListeners();
+  }
+
+  @override
+  void onUnregistered() {
+    sipRegistered = false;
+    if (signedIn) {
+      statusMessage = 'Registration dropped.';
+    }
+    notifyListeners();
+  }
+
+  @override
+  void onIncoming({
+    required String name,
+    required String number,
+    required bool video,
+  }) {
+    final ringing = IncomingCall(name: name, number: number);
+    incoming = ringing;
+    notifyListeners();
+    presentIncoming?.call(ringing);
+  }
+
+  @override
+  bool acceptOutgoing() => call != null;
+
+  @override
+  void onCallEnded(String reason) {
+    final ringing = incoming;
+    if (ringing != null && call == null) {
+      incoming = null;
+      _pushRecent(
+        name: ringing.name,
+        number: ringing.number,
+        direction: CallDirection.missed,
+        media: CallMedia.voice,
+        length: Duration.zero,
+        detail: reason,
+      );
+      notifyListeners();
+      return;
+    }
+    if (_endingLocally || call == null) {
+      return;
+    }
+    final current = call!;
+    _pushRecent(
+      name: current.name,
+      number: current.number,
+      direction: current.direction,
+      media: current.media,
+      length: current.elapsed(DateTime.now()),
+      detail: reason,
+    );
+    call = null;
+    _ticker?.cancel();
+    _ticker = null;
     notifyListeners();
   }
 
@@ -435,6 +705,13 @@ class PhoneController extends ChangeNotifier {
 
   void setStayRegistered(bool value) {
     stayRegistered = value;
+    if (signedIn) {
+      if (value) {
+        _softphone.register();
+      } else {
+        unawaited(_softphone.unregister());
+      }
+    }
     notifyListeners();
   }
 
@@ -459,13 +736,59 @@ class PhoneController extends ChangeNotifier {
   }
 
   void setMicrophone(String value) {
-    microphone = value;
+    microphoneId = value;
+    _pushAudioDevices();
     notifyListeners();
   }
 
   void setSpeaker(String value) {
-    speaker = value;
+    speakerId = value;
+    _pushAudioDevices();
     notifyListeners();
+  }
+
+  Future<void> refreshAudioDevices() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return;
+    }
+    try {
+      final inputs = await WindowsAudio.microphones();
+      final outputs = await WindowsAudio.speakers();
+      microphones = inputs.devices;
+      speakers = outputs.devices;
+      windowsDefaultMicrophone = inputs.windowsDefaultName;
+      windowsDefaultSpeaker = outputs.windowsDefaultName;
+      defaultMicrophoneId = inputs.preferredId;
+      defaultSpeakerId = outputs.preferredId;
+      if (microphoneId.isNotEmpty &&
+          !microphones.any((device) => device.id == microphoneId)) {
+        microphoneId = '';
+      }
+      if (speakerId.isNotEmpty &&
+          !speakers.any((device) => device.id == speakerId)) {
+        speakerId = '';
+      }
+      audioDeviceError = null;
+      _pushAudioDevices();
+    } catch (_) {
+      audioDeviceError = 'Could not read the Windows audio devices.';
+    }
+    notifyListeners();
+  }
+
+  Future<void> _prepareAudio() async {
+    if (microphoneId.isEmpty || speakerId.isEmpty) {
+      await refreshAudioDevices();
+      return;
+    }
+    _pushAudioDevices();
+  }
+
+  void _pushAudioDevices() {
+    _softphone.setAudioDevices(
+      microphoneId: microphoneId.isEmpty ? defaultMicrophoneId : microphoneId,
+      speakerId: speakerId.isEmpty ? defaultSpeakerId : speakerId,
+    );
   }
 
   void _pushRecent({
@@ -504,6 +827,7 @@ class PhoneController extends ChangeNotifier {
   @override
   void dispose() {
     _ticker?.cancel();
+    unawaited(_softphone.disconnect());
     super.dispose();
   }
 }

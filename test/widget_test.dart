@@ -2,9 +2,11 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fsphone/main.dart';
 
+import 'test_softphone.dart';
+
 void main() {
   testWidgets('Login offers a password and a one-time token', (tester) async {
-    await tester.pumpWidget(const FsPhoneApp());
+    await tester.pumpWidget(FsPhoneApp(softphone: TestSoftphone()));
 
     expect(find.text('Sign in'), findsOneWidget);
     expect(find.text('One-time token'), findsOneWidget);
@@ -19,11 +21,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const FsPhoneApp());
-    await tester.enterText(find.byKey(const Key('login-extension')), '1001');
-    await tester.enterText(find.byKey(const Key('login-secret')), 'secret');
-    await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(FsPhoneApp(softphone: TestSoftphone()));
+    await _signIn(tester);
 
     expect(find.text('Keypad'), findsWidgets);
     expect(find.text('Registered · WSS'), findsOneWidget);
@@ -48,32 +47,29 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const FsPhoneApp());
-    await tester.enterText(find.byKey(const Key('login-extension')), '1001');
-    await tester.enterText(find.byKey(const Key('login-secret')), 'secret');
-    await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(FsPhoneApp(softphone: TestSoftphone()));
+    await _signIn(tester);
 
     await tester.tap(find.text('Contacts'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Jordan Hale'), findsWidgets);
+    expect(find.text('No contacts match that search.'), findsOneWidget);
     expect(find.text('Company'), findsWidgets);
     expect(find.byKey(const Key('shell-search')), findsOneWidget);
   });
 
-  testWidgets('Clicking the QR code signs in', (tester) async {
+  testWidgets('The QR code does not register by itself', (tester) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const FsPhoneApp());
+    await tester.pumpWidget(FsPhoneApp(softphone: TestSoftphone()));
     await tester.tap(find.byKey(const Key('login-qr')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Registered · WSS'), findsOneWidget);
-    expect(find.text('Sign in'), findsNothing);
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Registered · WSS'), findsNothing);
   });
 
   testWidgets('Dial pad fits the minimum window', (tester) async {
@@ -82,7 +78,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const FsPhoneApp());
+    await tester.pumpWidget(FsPhoneApp(softphone: TestSoftphone()));
     await _signIn(tester);
 
     expect(tester.getSize(find.byKey(const Key('nav-rail'))).width, 132);
@@ -100,7 +96,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const FsPhoneApp());
+    await tester.pumpWidget(FsPhoneApp(softphone: TestSoftphone()));
     await _signIn(tester);
     await tester.tap(find.byKey(const ValueKey('dial-key-2')));
     await tester.tap(find.byKey(const ValueKey('dial-key-0')));
@@ -129,8 +125,8 @@ void main() {
     expect(find.text('Switch back'), findsOneWidget);
     await tester.tap(find.text('Switch back'));
     await tester.pump();
-    expect(find.text('Avery Shah'), findsWidgets);
-    expect(find.text('Jordan Hale is on hold.'), findsOneWidget);
+    expect(find.text('205'), findsWidgets);
+    expect(find.text('200 is on hold.'), findsOneWidget);
 
     await tester.tap(find.text('Contacts'));
     await tester.pump();
@@ -153,6 +149,10 @@ void main() {
 }
 
 Future<void> _signIn(WidgetTester tester) async {
+  await tester.enterText(
+    find.byKey(const Key('login-server')),
+    'wss://pbx.example.com:7443',
+  );
   await tester.enterText(find.byKey(const Key('login-extension')), '1001');
   await tester.enterText(find.byKey(const Key('login-secret')), 'secret');
   await tester.tap(find.byKey(const Key('login-submit')));

@@ -12,8 +12,7 @@ const qrLoginToken = 'test-token-1001';
 String get qrLoginPayload =>
     'fsphone://login?token=$qrLoginToken&ext=$qrLoginExtension&server=${Uri.encodeComponent(qrLoginServer)}';
 
-/// Test sign-in for the desktop UI. Credentials stay on this machine and are
-/// not sent anywhere. The QR block stands in for the PBX provisioning code.
+/// Signs the desktop app in by registering the extension over WSS.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.controller});
 
@@ -24,21 +23,50 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _server = TextEditingController(text: 'wss://pbx.example.com:7443');
+  final _server = TextEditingController();
+  final _domain = TextEditingController();
   final _extension = TextEditingController();
   final _secret = TextEditingController();
   LoginMode _mode = LoginMode.password;
+  bool _allowBadCertificate = true;
+  bool _busy = false;
+  bool _appliedSaved = false;
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_applySavedLogin);
+    _applySavedLogin();
+  }
+
+  void _applySavedLogin() {
+    final saved = widget.controller.remembered;
+    if (saved == null || _appliedSaved) {
+      return;
+    }
+    _appliedSaved = true;
+    _server.text = saved.server;
+    _domain.text = saved.domain;
+    _extension.text = saved.extension;
+    _secret.text = saved.password;
+    _allowBadCertificate = saved.trustAnyCertificate;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
   void dispose() {
+    widget.controller.removeListener(_applySavedLogin);
     _server.dispose();
+    _domain.dispose();
     _extension.dispose();
     _secret.dispose();
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final server = _server.text.trim();
     final extension = _extension.text.trim();
     final secret = _secret.text.trim();
@@ -52,25 +80,34 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = 'Enter the extension as 2 to 6 digits.');
       return;
     }
-    if (_mode == LoginMode.password && secret.isEmpty) {
+    if (_mode == LoginMode.token) {
+      setState(() {
+        _error = 'One-time token provisioning is not connected yet. Sign in with the extension password.';
+      });
+      return;
+    }
+    if (secret.isEmpty) {
       setState(() => _error = 'Enter the extension password to continue.');
       return;
     }
-    if (_mode == LoginMode.token && secret.length < 4) {
-      setState(() => _error = 'Enter the one-time token from the PBX link.');
-      return;
-    }
-    widget.controller.signIn(
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final error = await widget.controller.signIn(
       displayServer: server,
       displayExtension: extension,
+      password: secret,
+      domain: _domain.text,
+      trustAnyCertificate: _allowBadCertificate,
     );
-  }
-
-  void _signInFromQr() {
-    widget.controller.signIn(
-      displayServer: qrLoginServer,
-      displayExtension: qrLoginExtension,
-    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _error = error;
+    });
   }
 
   @override
@@ -134,7 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'The PBX shows a code that signs this desktop app in and keeps it registered.',
+            'A PBX provisioning code will live here later. It does not register this app yet.',
             textAlign: TextAlign.center,
             style: TextStyle(color: FsColors.muted, height: 1.35),
           ),
@@ -145,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: InkWell(
               key: const Key('login-qr'),
               borderRadius: BorderRadius.circular(8),
-              onTap: _signInFromQr,
+              onTap: () {},
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: QrImageView(
@@ -167,7 +204,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Click the code, or scan it, to sign straight in. It encodes the test provisioning link.',
+            'Use the extension password on the right to register with FreeSWITCH.',
             textAlign: TextAlign.center,
             style: TextStyle(color: FsColors.muted, fontSize: 12),
           ),
@@ -191,7 +228,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Sign in to the desktop app. This screen is for testing — nothing is registered with the PBX yet.',
+          'Registers this extension with FreeSWITCH over the Sofia WebSocket. A successful sign-in is remembered on this PC until you sign out.',
           style: TextStyle(color: FsColors.muted, height: 1.4),
         ),
         const SizedBox(height: 18),
@@ -228,6 +265,15 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 12),
         TextField(
+          key: const Key('login-domain'),
+          controller: _domain,
+          decoration: const InputDecoration(
+            labelText: 'SIP domain',
+            hintText: 'Leave blank to use the WebSocket host',
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
           key: const Key('login-extension'),
           controller: _extension,
           keyboardType: TextInputType.number,
@@ -246,6 +292,18 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           onSubmitted: (_) => _submit(),
         ),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _allowBadCertificate,
+          onChanged: (value) {
+            setState(() => _allowBadCertificate = value ?? false);
+          },
+          title: const Text('Allow the PBX certificate'),
+          subtitle: const Text(
+            'Needed when the Sofia WSS port uses a private or self-signed certificate.',
+          ),
+          controlAffinity: ListTileControlAffinity.leading,
+        ),
         if (_error != null) ...[
           const SizedBox(height: 10),
           Text(_error!, style: const TextStyle(color: FsColors.missed)),
@@ -255,8 +313,10 @@ class _LoginScreenState extends State<LoginScreen> {
           width: double.infinity,
           child: FilledButton(
             key: const Key('login-submit'),
-            onPressed: _submit,
-            child: const Text('Sign in'),
+            onPressed: _busy || widget.controller.restoring ? null : _submit,
+            child: Text(
+              _busy || widget.controller.restoring ? 'Registering…' : 'Sign in',
+            ),
           ),
         ),
       ],
