@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sip_ua/sip_ua.dart';
+// EventSending is emitted when the INVITE is handed to the socket, and
+// sip_ua does not re-export it.
+// ignore: implementation_imports
+import 'package:sip_ua/src/event_manager/internal_events.dart';
 
 /// Credentials for a direct FreeSWITCH Sofia registration. The PBX is reached
 /// over its existing WSS binding. No provisioning plugin is involved.
@@ -34,6 +38,9 @@ abstract class SoftphoneListener {
     required bool video,
   });
   void onCallEnded(String reason);
+
+  /// The INVITE has been handed to the WebSocket.
+  void onInviteSent();
 
   /// The SIP dialog is up, but media may still be negotiating.
   void onCallAccepted();
@@ -93,10 +100,13 @@ abstract class Softphone {
 class FsSipHelper extends SIPUAHelper {
   String? microphoneSourceId;
   String? speakerDeviceId;
+  void Function()? inviteSent;
 
   @override
   Map<String, dynamic> buildCallOptions([bool voiceonly = false]) {
     final options = super.buildCallOptions(voiceonly);
+    final handlers = options['eventHandlers'];
+    handlers.on(EventSending(), (EventSending _) => inviteSent?.call());
     final media = Map<String, dynamic>.from(
       options['mediaConstraints'] as Map<dynamic, dynamic>,
     );
@@ -135,7 +145,12 @@ class FsSipHelper extends SIPUAHelper {
 
 /// SIP over WSS via sip_ua, with WebRTC media from flutter_webrtc.
 class SofiaSoftphone extends Softphone implements SipUaHelperListener {
-  SofiaSoftphone({SIPUAHelper? helper}) : _helper = helper ?? FsSipHelper();
+  SofiaSoftphone({SIPUAHelper? helper}) : _helper = helper ?? FsSipHelper() {
+    final helper = _helper;
+    if (helper is FsSipHelper) {
+      helper.inviteSent = () => _listener?.onInviteSent();
+    }
+  }
 
   final SIPUAHelper _helper;
   SoftphoneListener? _listener;

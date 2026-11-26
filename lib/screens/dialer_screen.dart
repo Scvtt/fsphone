@@ -89,6 +89,15 @@ class DialerScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
+          if (controller.statusMessage != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                controller.statusMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: FsColors.missed),
+              ),
+            ),
           if (matches.isEmpty && dialed.isEmpty)
             const Text(
               'Type a number or pick a speed dial. Enter places the call.',
